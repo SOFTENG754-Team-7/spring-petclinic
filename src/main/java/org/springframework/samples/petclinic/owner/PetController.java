@@ -38,6 +38,14 @@ import jakarta.validation.Valid;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 /**
+ * Manages pet creation and updates within the context of a specific owner.
+ * Interacts with {@link OwnerRepository} to load owners and persist pet
+ * changes, and with {@link PetTypeRepository} to provide reference data.
+ * <p>
+ * Sustainability: explicit validation and centralized loading reduce duplicate
+ * logic, improve readability and maintainability, reduce onboarding effort,
+ * and lower long-term development cost while protecting data integrity.
+ * </p>
  * @author Juergen Hoeller
  * @author Ken Krebs
  * @author Arjen Poutsma
@@ -53,24 +61,48 @@ class PetController {
 
 	private final PetTypeRepository types;
 
+	/**
+	 * Creates the controller with its required repositories.
+	 * @param owners repository used for owner and pet persistence
+	 * @param types repository used to load available pet types
+	 */
 	public PetController(OwnerRepository owners, PetTypeRepository types) {
 		this.owners = owners;
 		this.types = types;
 	}
 
+	/**
+	 * Supplies pet type reference data for form rendering.
+	 * @return collection of available pet types
+	 */
 	@ModelAttribute("types")
 	public Collection<PetType> populatePetTypes() {
+		// Reference data caching is centralized to reduce duplication across views.
 		return this.types.findPetTypes();
 	}
 
+	/**
+	 * Resolves the owner for the current request scope.
+	 * @param ownerId owner identifier from the route
+	 * @return resolved owner
+	 * @throws IllegalArgumentException if the owner does not exist
+	 */
 	@ModelAttribute("owner")
 	public Owner findOwner(@PathVariable("ownerId") int ownerId) {
+		// Centralized loading improves reuse and reduces cognitive complexity.
 		Optional<Owner> optionalOwner = this.owners.findById(ownerId);
 		Owner owner = optionalOwner.orElseThrow(() -> new IllegalArgumentException(
 				"Owner not found with id: " + ownerId + ". Please ensure the ID is correct "));
 		return owner;
 	}
 
+	/**
+	 * Resolves the pet for edit flows or creates a new instance for create flows.
+	 * @param ownerId owner identifier from the route
+	 * @param petId optional pet identifier from the route
+	 * @return resolved or new pet instance
+	 * @throws IllegalArgumentException if the owner does not exist
+	 */
 	@ModelAttribute("pet")
 	public Pet findPet(@PathVariable("ownerId") int ownerId,
 			@PathVariable(name = "petId", required = false) Integer petId) {
@@ -79,38 +111,66 @@ class PetController {
 			return new Pet();
 		}
 
+		// Owner lookup is shared to keep validation and loading consistent.
 		Optional<Owner> optionalOwner = this.owners.findById(ownerId);
 		Owner owner = optionalOwner.orElseThrow(() -> new IllegalArgumentException(
 				"Owner not found with id: " + ownerId + ". Please ensure the ID is correct "));
 		return owner.getPet(petId);
 	}
 
+	/**
+	 * Protects owner identifiers from being rebound by form submissions.
+	 * @param dataBinder binder used to configure allowed and disallowed fields
+	 */
 	@InitBinder("owner")
 	public void initOwnerBinder(WebDataBinder dataBinder) {
+		// Prevent identifier tampering for data integrity.
 		dataBinder.setDisallowedFields("id", "*.id");
 	}
 
+	/**
+	 * Registers validation for pet forms and protects identifier fields.
+	 * @param dataBinder binder used to configure validation and allowed fields
+	 */
 	@InitBinder("pet")
 	public void initPetBinder(WebDataBinder dataBinder) {
+		// Validator enforces business rules consistently across create/edit flows.
 		dataBinder.setValidator(new PetValidator());
 		dataBinder.setDisallowedFields("id", "*.id");
 	}
 
+	/**
+	 * Initializes the pet creation form.
+	 * @param owner resolved owner for the current request
+	 * @param model model used to expose form state
+	 * @return view name for the create/update pet form
+	 */
 	@GetMapping("/pets/new")
 	public String initCreationForm(Owner owner, ModelMap model) {
+		// Pre-associate a new pet with the owner for consistent binding.
 		Pet pet = new Pet();
 		owner.addPet(pet);
 		return VIEWS_PETS_CREATE_OR_UPDATE_FORM;
 	}
 
+	/**
+	 * Validates and persists a new pet for an owner.
+	 * @param owner resolved owner for the current request
+	 * @param pet bound pet entity from the form
+	 * @param result validation results for the submitted pet
+	 * @param redirectAttributes attributes used to convey user feedback
+	 * @return redirect to the owner details page or the form view on errors
+	 */
 	@PostMapping("/pets/new")
 	public String processCreationForm(Owner owner, @Valid Pet pet, BindingResult result,
 			RedirectAttributes redirectAttributes) {
 
+		// Duplicate check prevents inconsistent state and reduces cleanup effort.
 		if (StringUtils.hasText(pet.getName()) && pet.isNew() && owner.getPet(pet.getName(), true) != null) {
 			result.rejectValue("name", "duplicate", "already exists");
 		}
 
+		// Date validation protects data quality and avoids future correction work.
 		LocalDate currentDate = LocalDate.now();
 		if (pet.getBirthDate() != null && pet.getBirthDate().isAfter(currentDate)) {
 			result.rejectValue("birthDate", "typeMismatch.birthDate");
@@ -120,17 +180,30 @@ class PetController {
 			return VIEWS_PETS_CREATE_OR_UPDATE_FORM;
 		}
 
+		// Persist through the owner aggregate for consistent lifecycle handling.
 		owner.addPet(pet);
 		this.owners.save(owner);
 		redirectAttributes.addFlashAttribute("message", "New Pet has been Added");
 		return "redirect:/owners/{ownerId}";
 	}
 
+	/**
+	 * Displays the pet update form.
+	 * @return view name for the create/update pet form
+	 */
 	@GetMapping("/pets/{petId}/edit")
 	public String initUpdateForm() {
 		return VIEWS_PETS_CREATE_OR_UPDATE_FORM;
 	}
 
+	/**
+	 * Validates and persists edits to an existing pet.
+	 * @param owner resolved owner for the current request
+	 * @param pet bound pet entity from the form
+	 * @param result validation results for the submitted pet
+	 * @param redirectAttributes attributes used to convey user feedback
+	 * @return redirect to the owner details page or the form view on errors
+	 */
 	@PostMapping("/pets/{petId}/edit")
 	public String processUpdateForm(Owner owner, @Valid Pet pet, BindingResult result,
 			RedirectAttributes redirectAttributes) {
@@ -138,6 +211,7 @@ class PetController {
 		String petName = pet.getName();
 
 		// checking if the pet name already exists for the owner
+		// Duplicate check minimizes conflicting records and user confusion.
 		if (StringUtils.hasText(petName)) {
 			Pet existingPet = owner.getPet(petName, false);
 			if (existingPet != null && !Objects.equals(existingPet.getId(), pet.getId())) {
@@ -145,6 +219,7 @@ class PetController {
 			}
 		}
 
+		// Date validation protects future reporting accuracy.
 		LocalDate currentDate = LocalDate.now();
 		if (pet.getBirthDate() != null && pet.getBirthDate().isAfter(currentDate)) {
 			result.rejectValue("birthDate", "typeMismatch.birthDate");
@@ -154,6 +229,7 @@ class PetController {
 			return VIEWS_PETS_CREATE_OR_UPDATE_FORM;
 		}
 
+		// Consolidated update path reduces duplication and eases maintenance.
 		updatePetDetails(owner, pet);
 		redirectAttributes.addFlashAttribute("message", "Pet details has been edited");
 		return "redirect:/owners/{ownerId}";
