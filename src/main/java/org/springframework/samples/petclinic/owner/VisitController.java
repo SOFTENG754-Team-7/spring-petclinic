@@ -34,11 +34,9 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
  * Manages visit booking workflows for pets belonging to owners.
  * Interacts with {@link OwnerRepository} to load owner aggregates and persist
  * visit additions consistently.
- * <p>
  * Sustainability: centralized loading, validation, and persistence reduce
  * duplication, improve readability, lower onboarding effort, and help keep
  * long-term maintenance costs predictable.
- * </p>
  * @author Juergen Hoeller
  * @author Ken Krebs
  * @author Arjen Poutsma

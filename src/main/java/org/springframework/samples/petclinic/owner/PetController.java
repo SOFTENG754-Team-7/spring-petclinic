@@ -41,11 +41,9 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
  * Manages pet creation and updates within the context of a specific owner.
  * Interacts with {@link OwnerRepository} to load owners and persist pet
  * changes, and with {@link PetTypeRepository} to provide reference data.
- * <p>
  * Sustainability: explicit validation and centralized loading reduce duplicate
  * logic, improve readability and maintainability, reduce onboarding effort,
  * and lower long-term development cost while protecting data integrity.
- * </p>
  * @author Juergen Hoeller
  * @author Ken Krebs
  * @author Arjen Poutsma

@@ -42,12 +42,10 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
  * Handles owner-facing workflows such as create, update, search, and view.
  * Interacts with {@link OwnerRepository} to load and persist {@link Owner}
  * aggregates for web requests.
- * <p>
  * Sustainability: clear responsibilities and explicit validation reduce
  * cognitive load, improve maintainability and readability, minimize duplicate
  * logic, lower onboarding effort and future development cost, and support
  * long-term technical sustainability.
- * </p>
  * @author Juergen Hoeller
  * @author Ken Krebs
  * @author Arjen Poutsma
