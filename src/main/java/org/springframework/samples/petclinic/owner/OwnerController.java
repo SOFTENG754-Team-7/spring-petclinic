@@ -39,6 +39,13 @@ import jakarta.validation.Valid;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 /**
+ * Handles owner-facing workflows such as create, update, search, and view.
+ * Interacts with {@link OwnerRepository} to load and persist {@link Owner}
+ * aggregates for web requests.
+ * Sustainability: clear responsibilities and explicit validation reduce
+ * cognitive load, improve maintainability and readability, minimize duplicate
+ * logic, lower onboarding effort and future development cost, and support
+ * long-term technical sustainability.
  * @author Juergen Hoeller
  * @author Ken Krebs
  * @author Arjen Poutsma
@@ -52,45 +59,87 @@ class OwnerController {
 
 	private final OwnerRepository owners;
 
+	/**
+	 * Creates the controller with its required repository dependency.
+	 * @param owners repository used for loading and persisting owners
+	 */
 	public OwnerController(OwnerRepository owners) {
 		this.owners = owners;
 	}
 
+	/**
+	 * Disallows binding of identifier fields to protect data integrity.
+	 * @param dataBinder binder used to configure allowed and disallowed fields
+	 */
 	@InitBinder
 	public void setAllowedFields(WebDataBinder dataBinder) {
+		// Prevent mass assignment of identifiers for integrity and safety.
 		dataBinder.setDisallowedFields("id", "*.id");
 	}
 
+	/**
+	 * Loads the owner for request processing, or creates a new instance for
+	 * create flows.
+	 * @param ownerId optional owner identifier from the route
+	 * @return resolved owner or a new {@link Owner}
+	 * @throws IllegalArgumentException if a requested owner is not found
+	 */
 	@ModelAttribute("owner")
 	public Owner findOwner(@PathVariable(name = "ownerId", required = false) Integer ownerId) {
+		// Centralized loading keeps controllers consistent and avoids duplication.
 		return ownerId == null ? new Owner()
 				: this.owners.findById(ownerId)
 					.orElseThrow(() -> new IllegalArgumentException("Owner not found with id: " + ownerId
 							+ ". Please ensure the ID is correct " + "and the owner exists in the database."));
 	}
 
+	/**
+	 * Displays the owner creation form.
+	 * @return view name for the create/update owner form
+	 */
 	@GetMapping("/owners/new")
 	public String initCreationForm() {
 		return VIEWS_OWNER_CREATE_OR_UPDATE_FORM;
 	}
 
+	/**
+	 * Validates and persists a new owner.
+	 * @param owner bound owner entity from the form
+	 * @param result validation results for the submitted owner
+	 * @param redirectAttributes attributes used to convey user feedback
+	 * @return redirect to the owner details page or the form view on errors
+	 */
 	@PostMapping("/owners/new")
 	public String processCreationForm(@Valid Owner owner, BindingResult result, RedirectAttributes redirectAttributes) {
+		// Validation gate reduces downstream errors and improves data quality.
 		if (result.hasErrors()) {
 			redirectAttributes.addFlashAttribute("error", "There was an error in creating the owner.");
 			return VIEWS_OWNER_CREATE_OR_UPDATE_FORM;
 		}
 
+		// Repository interaction centralized here for traceable persistence.
 		this.owners.save(owner);
 		redirectAttributes.addFlashAttribute("message", "New Owner Created");
 		return "redirect:/owners/" + owner.getId();
 	}
 
+	/**
+	 * Displays the owner search form.
+	 * @return view name for the owner search page
+	 */
 	@GetMapping("/owners/find")
 	public String initFindForm() {
 		return "owners/findOwners";
 	}
 
+	/**
+	 * Searches owners by last name with pagination.
+	 * @param page requested page number (1-based)
+	 * @param owner holder for search criteria
+	 * @param result validation results for the search form
+	 * @param model model used to expose pagination data and results
+	 * @return view name for search results or redirect to a single owner
+	 */
 	@GetMapping("/owners")
 	public String processFindForm(@RequestParam(defaultValue = "1") int page, Owner owner, BindingResult result,
 			Model model) {
@@ -101,6 +150,7 @@ class OwnerController {
 		}
 
 		// find owners by last name
+		// Repository query kept here to centralize search behavior.
 		Page<Owner> ownersResults = findPaginatedForOwnersLastName(page, lastName);
 		if (ownersResults.isEmpty()) {
 			// no owners found
@@ -115,6 +165,7 @@ class OwnerController {
 		}
 
 		// multiple owners found
+		// Pagination metadata improves UI clarity and scalability for large datasets.
 		return addPaginationModel(page, model, ownersResults);
 	}
 
@@ -133,25 +184,40 @@ class OwnerController {
 		return owners.findByLastNameStartingWith(lastname, pageable);
 	}
 
+	/**
+	 * Displays the owner update form.
+	 * @return view name for the create/update owner form
+	 */
 	@GetMapping("/owners/{ownerId}/edit")
 	public String initUpdateOwnerForm() {
 		return VIEWS_OWNER_CREATE_OR_UPDATE_FORM;
 	}
 
+	/**
+	 * Validates and persists updates to an existing owner.
+	 * @param owner bound owner entity from the form
+	 * @param result validation results for the submitted owner
+	 * @param ownerId identifier from the route to enforce consistency
+	 * @param redirectAttributes attributes used to convey user feedback
+	 * @return redirect to the owner details page or the form view on errors
+	 */
 	@PostMapping("/owners/{ownerId}/edit")
 	public String processUpdateOwnerForm(@Valid Owner owner, BindingResult result, @PathVariable("ownerId") int ownerId,
 			RedirectAttributes redirectAttributes) {
+		// Validation gate improves data quality and reduces follow-up maintenance.
 		if (result.hasErrors()) {
 			redirectAttributes.addFlashAttribute("error", "There was an error in updating the owner.");
 			return VIEWS_OWNER_CREATE_OR_UPDATE_FORM;
 		}
 
 		if (!Objects.equals(owner.getId(), ownerId)) {
+			// URL-to-form consistency check protects against tampering and mistakes.
 			result.rejectValue("id", "mismatch", "The owner ID in the form does not match the URL.");
 			redirectAttributes.addFlashAttribute("error", "Owner ID mismatch. Please try again.");
 			return "redirect:/owners/{ownerId}/edit";
 		}
 
+		// Explicitly set ID to ensure updates target the intended aggregate.
 		owner.setId(ownerId);
 		this.owners.save(owner);
 		redirectAttributes.addFlashAttribute("message", "Owner Values Updated");
@@ -162,10 +228,12 @@ class OwnerController {
 	 * Custom handler for displaying an owner.
 	 * @param ownerId the ID of the owner to display
 	 * @return a ModelMap with the model attributes for the view
+	 * @throws IllegalArgumentException if the owner does not exist
 	 */
 	@GetMapping("/owners/{ownerId}")
 	public ModelAndView showOwner(@PathVariable("ownerId") int ownerId) {
 		ModelAndView mav = new ModelAndView("owners/ownerDetails");
+		// Repository lookup centralized to keep read paths consistent.
 		Optional<Owner> optionalOwner = this.owners.findById(ownerId);
 		Owner owner = optionalOwner.orElseThrow(() -> new IllegalArgumentException(
 				"Owner not found with id: " + ownerId + ". Please ensure the ID is correct "));
